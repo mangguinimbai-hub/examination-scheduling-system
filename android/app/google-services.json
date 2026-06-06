@@ -1,0 +1,48 @@
+{
+  "project_info": {
+    "project_number": "1048613624349",
+    "project_id": "smart-exam-scheduler",
+    "storage_bucket": "smart-exam-scheduler.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:1048613624349:android:92a413b8e56208d7a504f4",
+        "android_client_info": {
+          "package_name": "com.capstone.smart_exam_scheduler"
+        }
+      },
+      "oauth_client": [],
+      "api_key": [
+        {
+          "current_key": "AIzaSyCRy7nrufTosCQebs5PoLIIhv1rkPeYFlU"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": []
+        }
+      }
+    },
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:1048613624349:android:d1b7e4e8ef448723a504f4",
+        "android_client_info": {
+          "package_name": "com.exam.schedulerapp"
+        }
+      },
+      "oauth_client": [],
+      "api_key": [
+        {
+          "current_key": "AIzaSyCRy7nrufTosCQebs5PoLIIhv1rkPeYFlU"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": []
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}
