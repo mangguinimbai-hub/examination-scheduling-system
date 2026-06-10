@@ -3,6 +3,7 @@ import 'package:flutter/material.dart';
 
 import 'firebase_options.dart';
 import 'screens/auth_gate.dart';
+import 'screens/post_announcement_screen.dart';
 
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
@@ -26,7 +27,14 @@ class SmartExamSchedulerApp extends StatelessWidget {
         colorSchemeSeed: Colors.blue,
         useMaterial3: true,
       ),
+
+      // First screen after app starts
       home: const AuthGate(),
+
+      // App routes
+      routes: {
+        '/post-announcement': (context) => const PostAnnouncementScreen(),
+      },
     );
   }
 }

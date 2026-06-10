@@ -5,17 +5,11 @@ import '../widgets/dashboard_button.dart';
 import '../widgets/dashboard_layout.dart';
 import 'create_schedule_screen.dart';
 import 'view_schedules_screen.dart';
+import 'post_announcement_screen.dart';
+import 'view_announcements_screen.dart';
 
 class AdminDashboard extends StatelessWidget {
   const AdminDashboard({super.key});
-
-  void showComingSoon(BuildContext context, String feature) {
-    ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(
-        content: Text('$feature will be added next.'),
-      ),
-    );
-  }
 
   @override
   Widget build(BuildContext context) {
@@ -53,7 +47,12 @@ class AdminDashboard extends StatelessWidget {
           icon: Icons.campaign,
           label: 'Post Announcement',
           onTap: () {
-            showComingSoon(context, 'Post Announcement');
+            Navigator.push(
+              context,
+              MaterialPageRoute(
+                builder: (_) => const PostAnnouncementScreen(),
+              ),
+            );
           },
         ),
 
@@ -61,7 +60,12 @@ class AdminDashboard extends StatelessWidget {
           icon: Icons.announcement,
           label: 'View Announcements',
           onTap: () {
-            showComingSoon(context, 'View Announcements');
+            Navigator.push(
+              context,
+              MaterialPageRoute(
+                builder: (_) => const ViewAnnouncementsScreen(),
+              ),
+            );
           },
         ),
 

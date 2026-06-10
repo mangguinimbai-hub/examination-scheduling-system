@@ -2,6 +2,18 @@ import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/material.dart';
 
+class ConflictResult {
+  final String? message;
+  final List<String> suggestions;
+
+  ConflictResult({
+    this.message,
+    this.suggestions = const [],
+  });
+
+  bool get hasConflict => message != null;
+}
+
 class CreateScheduleScreen extends StatefulWidget {
   const CreateScheduleScreen({super.key});
 
@@ -19,6 +31,42 @@ class _CreateScheduleScreenState extends State<CreateScheduleScreen> {
   final facultyController = TextEditingController();
 
   bool isLoading = false;
+
+  // Change this based on your actual rooms.
+  final List<String> roomOptions = [
+    'Lab 1',
+    'Lab 2',
+    'Room 101',
+    'Room 102',
+    'Room 103',
+    'Room 104',
+  ];
+
+  String normalizeText(Object? text) {
+    return (text ?? '')
+        .toString()
+        .trim()
+        .toLowerCase()
+        .replaceAll(RegExp(r'\s+'), ' ');
+  }
+
+  String createScheduleId({
+    required String course,
+    required String subject,
+    required String examDate,
+    required String startTime,
+    required String endTime,
+    required String room,
+    required String faculty,
+  }) {
+    final rawKey =
+        '${normalizeText(course)}_${normalizeText(subject)}_${normalizeText(examDate)}_${normalizeText(startTime)}_${normalizeText(endTime)}_${normalizeText(room)}_${normalizeText(faculty)}';
+
+    return rawKey
+        .replaceAll(RegExp(r'[^a-z0-9]+'), '_')
+        .replaceAll(RegExp(r'_+'), '_')
+        .replaceAll(RegExp(r'^_|_$'), '');
+  }
 
   int? timeToMinutes(String time) {
     final value = time.trim();
@@ -38,8 +86,135 @@ class _CreateScheduleScreenState extends State<CreateScheduleScreen> {
     return hour * 60 + minute;
   }
 
+  String formatMinutesToTime(int minutes) {
+    final hour = (minutes ~/ 60).toString().padLeft(2, '0');
+    final minute = (minutes % 60).toString().padLeft(2, '0');
+    return '$hour:$minute';
+  }
+
   bool isOverlapping(int start1, int end1, int start2, int end2) {
     return start1 < end2 && start2 < end1;
+  }
+
+  bool candidateHasConflict({
+    required List<QueryDocumentSnapshot<Map<String, dynamic>>> docs,
+    required int candidateStart,
+    required int candidateEnd,
+    required String candidateRoom,
+    required String candidateFaculty,
+    required String candidateCourse,
+  }) {
+    for (final doc in docs) {
+      final data = doc.data();
+
+      final existingRoom = normalizeText(data['room']);
+      final existingFaculty = normalizeText(
+        data['faculty'] ?? data['instructor'],
+      );
+      final existingCourse = normalizeText(data['course']);
+
+      final existingStartTime = (data['startTime'] ?? '').toString().trim();
+      final existingEndTime = (data['endTime'] ?? '').toString().trim();
+
+      final existingStart = timeToMinutes(existingStartTime);
+      final existingEnd = timeToMinutes(existingEndTime);
+
+      if (existingStart == null || existingEnd == null) {
+        continue;
+      }
+
+      final hasTimeOverlap = isOverlapping(
+        candidateStart,
+        candidateEnd,
+        existingStart,
+        existingEnd,
+      );
+
+      final sameRoom = existingRoom == normalizeText(candidateRoom);
+      final sameFaculty = existingFaculty == normalizeText(candidateFaculty);
+      final sameCourse = existingCourse == normalizeText(candidateCourse);
+
+      if (hasTimeOverlap && (sameRoom || sameFaculty || sameCourse)) {
+        return true;
+      }
+    }
+
+    return false;
+  }
+
+  List<String> generateSuggestions({
+    required List<QueryDocumentSnapshot<Map<String, dynamic>>> docs,
+    required int newStart,
+    required int newEnd,
+    required String room,
+    required String faculty,
+    required String course,
+  }) {
+    final List<String> suggestions = [];
+
+    final duration = newEnd - newStart;
+
+    // You can change this depending on your school schedule.
+    const schoolStart = 7 * 60; // 07:00
+    const schoolEnd = 17 * 60; // 17:00
+
+    // Suggest another available time using the same room.
+    for (int start = schoolStart;
+    start + duration <= schoolEnd && suggestions.length < 3;
+    start += 30) {
+      final end = start + duration;
+
+      if (start == newStart && end == newEnd) {
+        continue;
+      }
+
+      final hasConflict = candidateHasConflict(
+        docs: docs,
+        candidateStart: start,
+        candidateEnd: end,
+        candidateRoom: room,
+        candidateFaculty: faculty,
+        candidateCourse: course,
+      );
+
+      if (!hasConflict) {
+        suggestions.add(
+          'Try ${formatMinutesToTime(start)} - ${formatMinutesToTime(end)} in $room.',
+        );
+      }
+    }
+
+    // Suggest another room using the same selected time.
+    for (final availableRoom in roomOptions) {
+      if (suggestions.length >= 5) break;
+
+      if (normalizeText(availableRoom) == normalizeText(room)) {
+        continue;
+      }
+
+      final hasConflict = candidateHasConflict(
+        docs: docs,
+        candidateStart: newStart,
+        candidateEnd: newEnd,
+        candidateRoom: availableRoom,
+        candidateFaculty: faculty,
+        candidateCourse: course,
+      );
+
+      if (!hasConflict) {
+        suggestions.add(
+          'Try $availableRoom at ${formatMinutesToTime(newStart)} - ${formatMinutesToTime(newEnd)}.',
+        );
+      }
+    }
+
+    if (suggestions.isEmpty) {
+      suggestions.add(
+        'Try another date, another room, or a time outside the conflicting schedule.',
+      );
+    }
+
+    return suggestions;
   }
 
   Future<void> pickDate() async {
@@ -72,18 +247,35 @@ class _CreateScheduleScreenState extends State<CreateScheduleScreen> {
     }
   }
 
-  Future<String?> checkConflict({
+  Future<ConflictResult> checkConflict({
+    required String course,
+    required String subject,
     required String examDate,
     required String startTime,
     required String endTime,
     required String room,
     required String faculty,
+    required String scheduleId,
   }) async {
     final newStart = timeToMinutes(startTime);
     final newEnd = timeToMinutes(endTime);
 
     if (newStart == null || newEnd == null) {
-      return 'Invalid time format.';
+      return ConflictResult(message: 'Invalid time format.');
+    }
+
+    final duplicateDoc = await FirebaseFirestore.instance
+        .collection('schedules')
+        .doc(scheduleId)
+        .get();
+
+    if (duplicateDoc.exists) {
+      return ConflictResult(
+        message: 'Duplicate detected: This exact schedule already exists.',
+        suggestions: [
+          'Change the date, time, room, subject, or faculty before saving again.',
+        ],
+      );
     }
 
     final snapshot = await FirebaseFirestore.instance
@@ -91,17 +283,17 @@ class _CreateScheduleScreenState extends State<CreateScheduleScreen> {
         .where('examDate', isEqualTo: examDate)
         .get();
 
-    for (final doc in snapshot.docs) {
+    final docs = snapshot.docs;
+
+    for (final doc in docs) {
       final data = doc.data();
 
-      final existingRoom =
-      (data['room'] ?? '').toString().trim().toLowerCase();
-
-      final existingFaculty =
-      (data['faculty'] ?? data['instructor'] ?? '')
-          .toString()
-          .trim()
-          .toLowerCase();
+      final existingCourse = normalizeText(data['course']);
+      final existingSubject = normalizeText(data['subject']);
+      final existingRoom = normalizeText(data['room']);
+      final existingFaculty = normalizeText(
+        data['faculty'] ?? data['instructor'],
+      );
 
       final existingStartTime = (data['startTime'] ?? '').toString().trim();
       final existingEndTime = (data['endTime'] ?? '').toString().trim();
@@ -120,19 +312,58 @@ class _CreateScheduleScreenState extends State<CreateScheduleScreen> {
         existingEnd,
       );
 
-      final sameRoom = existingRoom == room.trim().toLowerCase();
-      final sameFaculty = existingFaculty == faculty.trim().toLowerCase();
+      final sameCourse = existingCourse == normalizeText(course);
+      final sameSubject = existingSubject == normalizeText(subject);
+      final sameRoom = existingRoom == normalizeText(room);
+      final sameFaculty = existingFaculty == normalizeText(faculty);
+
+      final suggestions = generateSuggestions(
+        docs: docs,
+        newStart: newStart,
+        newEnd: newEnd,
+        room: room,
+        faculty: faculty,
+        course: course,
+      );
+
+      if (sameCourse &&
+          sameSubject &&
+          sameRoom &&
+          sameFaculty &&
+          existingStartTime == startTime &&
+          existingEndTime == endTime) {
+        return ConflictResult(
+          message: 'Duplicate detected: This exact schedule already exists.',
+          suggestions: suggestions,
+        );
+      }
 
       if (sameRoom && hasTimeOverlap) {
-        return 'Conflict detected: This room is already used during the selected time.';
+        return ConflictResult(
+          message:
+          'Conflict detected: This room is already used during the selected time.',
+          suggestions: suggestions,
+        );
       }
 
       if (sameFaculty && hasTimeOverlap) {
-        return 'Conflict detected: This faculty already has an exam during the selected time.';
+        return ConflictResult(
+          message:
+          'Conflict detected: This faculty already has an exam during the selected time.',
+          suggestions: suggestions,
+        );
+      }
+
+      if (sameCourse && hasTimeOverlap) {
+        return ConflictResult(
+          message:
+          'Conflict detected: This course/section already has an exam during the selected time.',
+          suggestions: suggestions,
+        );
       }
     }
 
-    return null;
+    return ConflictResult();
   }
 
   Future<void> saveSchedule() async {
@@ -168,36 +399,72 @@ class _CreateScheduleScreenState extends State<CreateScheduleScreen> {
       return;
     }
 
+    final scheduleId = createScheduleId(
+      course: course,
+      subject: subject,
+      examDate: examDate,
+      startTime: startTime,
+      endTime: endTime,
+      room: room,
+      faculty: faculty,
+    );
+
     setState(() {
       isLoading = true;
     });
 
     try {
-      final conflictMessage = await checkConflict(
+      final conflictResult = await checkConflict(
+        course: course,
+        subject: subject,
         examDate: examDate,
         startTime: startTime,
         endTime: endTime,
         room: room,
         faculty: faculty,
+        scheduleId: scheduleId,
       );
 
-      if (conflictMessage != null) {
-        showMessage(conflictMessage);
+      if (conflictResult.hasConflict) {
+        showConflictDialog(
+          conflictResult.message!,
+          conflictResult.suggestions,
+        );
         return;
       }
 
-      await FirebaseFirestore.instance.collection('schedules').add({
-        'course': course,
-        'subject': subject,
-        'examDate': examDate,
-        'startTime': startTime,
-        'endTime': endTime,
-        'examTime': '$startTime - $endTime',
-        'room': room,
-        'faculty': faculty,
-        'instructor': faculty,
-        'createdBy': FirebaseAuth.instance.currentUser?.uid,
-        'createdAt': FieldValue.serverTimestamp(),
+      final scheduleRef =
+      FirebaseFirestore.instance.collection('schedules').doc(scheduleId);
+
+      await FirebaseFirestore.instance.runTransaction((transaction) async {
+        final existingSchedule = await transaction.get(scheduleRef);
+
+        if (existingSchedule.exists) {
+          throw Exception(
+            'Duplicate detected: This exact schedule already exists.',
+          );
+        }
+
+        transaction.set(scheduleRef, {
+          'course': course,
+          'courseLower': normalizeText(course),
+          'subject': subject,
+          'subjectLower': normalizeText(subject),
+          'examDate': examDate,
+          'startTime': startTime,
+          'endTime': endTime,
+          'startMinutes': startMinutes,
+          'endMinutes': endMinutes,
+          'examTime': '$startTime - $endTime',
+          'room': room,
+          'roomLower': normalizeText(room),
+          'faculty': faculty,
+          'facultyLower': normalizeText(faculty),
+          'instructor': faculty,
+          'scheduleKey': scheduleId,
+          'createdBy': FirebaseAuth.instance.currentUser?.uid,
+          'createdAt': FieldValue.serverTimestamp(),
+        });
       });
 
       showMessage('Exam schedule saved successfully.');
@@ -210,7 +477,7 @@ class _CreateScheduleScreenState extends State<CreateScheduleScreen> {
       roomController.clear();
       facultyController.clear();
     } catch (e) {
-      showMessage('Failed to save schedule: $e');
+      showMessage(e.toString().replaceAll('Exception: ', ''));
     } finally {
       if (mounted) {
         setState(() {
@@ -218,6 +485,48 @@ class _CreateScheduleScreenState extends State<CreateScheduleScreen> {
         });
       }
     }
+  }
+
+  void showConflictDialog(String message, List<String> suggestions) {
+    showDialog(
+      context: context,
+      builder: (context) {
+        return AlertDialog(
+          title: const Text('Schedule Conflict'),
+          content: ConstrainedBox(
+            constraints: BoxConstraints(
+              maxHeight: MediaQuery.of(context).size.height * 0.55,
+            ),
+            child: SingleChildScrollView(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(message),
+                  const SizedBox(height: 12),
+                  const Text(
+                    'Suggestions:',
+                    style: TextStyle(fontWeight: FontWeight.bold),
+                  ),
+                  const SizedBox(height: 6),
+                  ...suggestions.map(
+                        (suggestion) => Padding(
+                      padding: const EdgeInsets.only(bottom: 5),
+                      child: Text('• $suggestion'),
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(context),
+              child: const Text('OK'),
+            ),
+          ],
+        );
+      },
+    );
   }
 
   void showMessage(String message) {
